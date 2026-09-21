@@ -1,8 +1,9 @@
 const { Bot, InlineKeyboard, Keyboard } = require("grammy");
 const http = require("http");
+const fs = require("fs"); // Fayllar bilan ishlash moduli
 
 // ==========================================
-// 1. SOZLAMALAR VA BAZA (IN-MEMORY MAP)
+// 1. SOZLAMALAR VA BAZA (JSON FAYL ORQALI)
 // ==========================================
 const BOT_TOKEN = process.env.BOT_TOKEN || "8937720285:AAG-qKGEE8dCMsH2CNQwRlSrAtRCPwsN7DQ";
 const MY_ADMIN_ID = 8977292662; 
@@ -10,8 +11,29 @@ const ADMIN_USERNAME = "@ADHAMAJON_AHMADOV";
 
 const bot = new Bot(BOT_TOKEN);
 
-// Bazani xavfsiz saqlash
-const moviesDatabase = new Map();
+// Kinolarni JSON fayldan yuklab olish (Server o'chib yonsa ham o'chib ketmaydi)
+let moviesDatabase = new Map();
+if (fs.existsSync("movies.json")) {
+  try {
+    const rawData = fs.readFileSync("movies.json", "utf-8");
+    const parsed = JSON.parse(rawData);
+    moviesDatabase = new Map(Object.entries(parsed));
+    console.log(`[BAZA] Fayldan ${moviesDatabase.size} ta kino yuklandi!`);
+  } catch (err) {
+    console.error("[BAZA XATOSI] JSON o'qishda xatolik:", err.message);
+  }
+}
+
+// Baza o'zgarganda faylga saqlash funksiyasi
+function saveDatabase() {
+  try {
+    const obj = Object.fromEntries(moviesDatabase);
+    fs.writeFileSync("movies.json", JSON.stringify(obj, null, 2), "utf-8");
+  } catch (err) {
+    console.error("[BAZA XATOSI] Faylga yozishda xatolik:", err.message);
+  }
+}
+
 const requiredChannels = new Set();
 const usersList = new Set();
 let totalSearches = 0;
@@ -29,7 +51,7 @@ http.createServer((req, res) => {
 });
 
 // ==========================================
-// 3. MAJBURIY OBUNA TEKSHIRUVI (ASYNCHRONOUS)
+// 3. MAJBURIY OBUNA TEKSHIRUVI
 // ==========================================
 async function checkUserSub(ctx) {
   try {
@@ -45,11 +67,10 @@ async function checkUserSub(ctx) {
     }
     return true;
   } catch (e) {
-    return true; // Xatolik bo'lsa bot to'xtab qolmaydi
+    return true;
   }
 }
 
-// Barcha xabarlarga ishlov beruvchi himoya qatlami
 bot.use(async (ctx, next) => {
   try {
     if (ctx.from && !ctx.from.is_bot) {
@@ -78,15 +99,13 @@ bot.use(async (ctx, next) => {
 });
 
 // ==========================================
-// 4. KANAL POSTLARINI O'QISH VA SAQLASH
+// 4. KANAL POSTLARINI O'QISH VA FAYLGA SAQLASH
 // ==========================================
 bot.on("channel_post", async (ctx) => {
   try {
     const post = ctx.channelPost;
     
-    // Video va izoh bo'lsa
     if (post.video && post.caption) {
-      // Izohdan "Kod:" so'zidan keyingi yoki eng birinchi raqamni topadi
       const match = post.caption.match(/\d+/);
       if (match) {
         const code = match[0];
@@ -94,7 +113,8 @@ bot.on("channel_post", async (ctx) => {
           fileId: post.video.file_id,
           caption: post.caption
         });
-        console.log(`[BAZA] Yangi kino qo'shildi! KOD: ${code}`);
+        saveDatabase(); // <--- Kinoni diskka (movies.json) saqlab qo'yadi!
+        console.log(`[BAZA] Yangi kino qo'shildi va faylga saqlandi! KOD: ${code}`);
       }
     }
   } catch (err) {
@@ -167,7 +187,7 @@ bot.command("addchannel", async (ctx) => {
   if (ctx.from.id !== MY_ADMIN_ID) return;
   const chName = ctx.message.text.split(" ")[1];
   if (!chName || !chName.startsWith("@")) {
-    return ctx.reply("⚠️ Noto'g'ri format! Masalan: `/addchannel @kanal_nomi`", { parse_mode: "Markdown" });
+    return ctx.reply("⚠️ Noto'g me'yoriy format! Masalan: `/addchannel @kanal_nomi`", { parse_mode: "Markdown" });
   }
   requiredChannels.add(chName);
   await ctx.reply(`✅ **${chName}** majburiy obunalar ro'yxatiga qo'shildi!`, { parse_mode: "Markdown" });
@@ -201,7 +221,6 @@ bot.on("message:text", async (ctx) => {
   try {
     const text = ctx.message.text.trim();
 
-    // Menyu tugmalariga tegmaslik
     if (["🔍 Qanday foydalaniladi?", "📊 Statistika", "👨‍💻 Admin bilan aloqa"].includes(text)) return;
 
     const match = text.match(/\d+/);
@@ -228,7 +247,7 @@ bot.on("message:text", async (ctx) => {
     }
   } catch (err) {
     console.error("[SEARCH ERROR]:", err.message);
-    await ctx.reply("⚠️ Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.");
+    // Kiber-xatolik (botni user block qilganda bot to'xtab qolmasligi uchun try/catch ishlaydi)
   }
 });
 
