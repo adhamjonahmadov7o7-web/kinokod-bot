@@ -13,10 +13,16 @@ try {
 // ==========================================
 // 1. SOZLAMALAR VA BAZA
 // ==========================================
-const BOT_TOKEN = process.env.BOT_TOKEN || "8937720285:AAG-qKGEE8dCMsH2CNQwRlSrAtRCPwsN7DQ";
+// Tokenni Render Environment Variables'dan oladi
+const BOT_TOKEN = process.env.BOT_TOKEN; 
 const MY_ADMIN_ID = 8977292662; 
 const ADMIN_USERNAME = "@ADHAMAJON_AHMADOV";
-const SECRET_CHANNEL_ID = -1003937523012; // Maxfiy kino baza kanali ID'si
+const SECRET_CHANNEL_ID = -1003937523012; 
+
+if (!BOT_TOKEN) {
+  console.error("❌ BOT_TOKEN topilmadi! Render Environment Variables'ga kiriting.");
+  process.exit(1);
+}
 
 const bot = new Bot(BOT_TOKEN);
 
@@ -33,6 +39,19 @@ if (fs.existsSync("movies.json")) {
   }
 }
 
+// JSON fayldan foydalanuvchilar ro'yxatini yuklash
+let usersList = new Set();
+if (fs.existsSync("users.json")) {
+  try {
+    const rawUsers = fs.readFileSync("users.json", "utf-8");
+    usersList = new Set(JSON.parse(rawUsers));
+  } catch (err) {
+    console.error("[USERS XATOSI] JSON o'qishda xatolik:", err.message);
+  }
+}
+
+let totalSearches = 0;
+
 // Baza o'zgarganda faylga saqlash
 function saveDatabase() {
   try {
@@ -43,8 +62,14 @@ function saveDatabase() {
   }
 }
 
-const usersList = new Set();
-let totalSearches = 0;
+// Foydalanuvchilarni faylga saqlash
+function saveUsers() {
+  try {
+    fs.writeFileSync("users.json", JSON.stringify(Array.from(usersList)), "utf-8");
+  } catch (err) {
+    console.error("[USERS XATOSI] Faylga yozishda xatolik:", err.message);
+  }
+}
 
 // ==========================================
 // 2. SERVER (RENDER ANTI-SLEEP)
@@ -79,17 +104,14 @@ async function checkUserSub(ctx) {
   }
 }
 
-// Tugmalarni tayyorlash (Telegram + Instagram)
 function getSubscriptionKeyboard() {
   const kb = new InlineKeyboard();
 
-  // Telegram kanallari
   for (const ch of socialLinks.telegramChannels) {
     const cleanLink = ch.startsWith("http") ? ch : `https://t.me/${ch.replace("@", "")}`;
     kb.url(`📢 Telegram Kanalimiz`, cleanLink).row();
   }
 
-  // Instagram havolalari
   if (socialLinks.instagramLinks) {
     for (const insta of socialLinks.instagramLinks) {
       kb.url(insta.name || "📸 Instagram", insta.url).row();
@@ -103,7 +125,10 @@ function getSubscriptionKeyboard() {
 bot.use(async (ctx, next) => {
   try {
     if (ctx.from && !ctx.from.is_bot) {
-      usersList.add(ctx.from.id);
+      if (!usersList.has(ctx.from.id)) {
+        usersList.add(ctx.from.id);
+        saveUsers();
+      }
     }
 
     if (ctx.chat?.type === "private" && ctx.message?.text !== "/start") {
@@ -128,17 +153,20 @@ bot.on("channel_post", async (ctx) => {
   try {
     const post = ctx.channelPost;
 
-    // Faqat maxfiy bazangiz (-1003937523012) dan kelgan videolar
-    if (post.chat.id === SECRET_CHANNEL_ID && post.video && post.caption) {
+    if (post.chat.id === SECRET_CHANNEL_ID && post.caption) {
       const match = post.caption.match(/\d+/);
       if (match) {
         const code = match[0];
-        moviesDatabase.set(code, {
-          fileId: post.video.file_id,
-          caption: post.caption
-        });
-        saveDatabase(); // movies.json fayliga yozadi
-        console.log(`[BAZA] Yangi kino saqlandi! Kod: ${code}`);
+        const fileId = post.video ? post.video.file_id : (post.document ? post.document.file_id : null);
+        
+        if (fileId) {
+          moviesDatabase.set(code, {
+            fileId: fileId,
+            caption: post.caption
+          });
+          saveDatabase();
+          console.log(`[BAZA] Yangi kino saqlandi! Kod: ${code}`);
+        }
       }
     }
   } catch (err) {
@@ -203,6 +231,9 @@ bot.hears("👨‍💻 Admin bilan aloqa", async (ctx) => {
 // ==========================================
 bot.on("message:text", async (ctx) => {
   try {
+    // Faqat shaxsiy chatlarda javob beradi
+    if (ctx.chat.type !== "private") return; 
+
     const text = ctx.message.text.trim();
 
     if (["🔍 Qanday foydalaniladi?", "📊 Statistika", "👨‍💻 Admin bilan aloqa"].includes(text)) return;
