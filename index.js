@@ -47,14 +47,15 @@ const usersList = new Set();
 let totalSearches = 0;
 
 // ==========================================
-// 2. SERVER (24/7 ONLINE TURLISHI UCHUN)
+// 2. SERVER (RENDER ANTI-SLEEP)
 // ==========================================
 const PORT = process.env.PORT || 10000;
+
 http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end("KinoBot Server Active 24/7");
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("OK");
 }).listen(PORT, () => {
-  console.log(`[SYSTEM] Server ${PORT}-portda ishlamoqda.`);
+  console.log(`[SYSTEM] Server ${PORT}-portda muvaffaqiyatli ishga tushdi.`);
 });
 
 // ==========================================
