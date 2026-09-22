@@ -1,17 +1,26 @@
 const { Bot, InlineKeyboard, Keyboard } = require("grammy");
 const http = require("http");
-const fs = require("fs"); // Fayllar bilan ishlash moduli
+const fs = require("fs");
+
+// Kanallar va Instagram havolalarini yuklash
+let socialLinks = { telegramChannels: [], instagramLinks: [] };
+try {
+  socialLinks = require("./channels.js");
+} catch (e) {
+  socialLinks.telegramChannels = ["@Adhamjon_Live"];
+}
 
 // ==========================================
-// 1. SOZLAMALAR VA BAZA (JSON FAYL ORQALI)
+// 1. SOZLAMALAR VA BAZA
 // ==========================================
 const BOT_TOKEN = process.env.BOT_TOKEN || "8937720285:AAG-qKGEE8dCMsH2CNQwRlSrAtRCPwsN7DQ";
 const MY_ADMIN_ID = 8977292662; 
 const ADMIN_USERNAME = "@ADHAMAJON_AHMADOV";
+const SECRET_CHANNEL_ID = -1003937523012; // Maxfiy kino baza kanali ID'si
 
 const bot = new Bot(BOT_TOKEN);
 
-// Kinolarni JSON fayldan yuklab olish (Server o'chib yonsa ham o'chib ketmaydi)
+// JSON fayldan kinolarni o'qib olish
 let moviesDatabase = new Map();
 if (fs.existsSync("movies.json")) {
   try {
@@ -24,7 +33,7 @@ if (fs.existsSync("movies.json")) {
   }
 }
 
-// Baza o'zgarganda faylga saqlash funksiyasi
+// Baza o'zgarganda faylga saqlash
 function saveDatabase() {
   try {
     const obj = Object.fromEntries(moviesDatabase);
@@ -34,20 +43,18 @@ function saveDatabase() {
   }
 }
 
-const requiredChannels = new Set();
 const usersList = new Set();
 let totalSearches = 0;
 
 // ==========================================
-// 2. SERVER (RENDER ANTI-SLEEP)
+// 2. SERVER (24/7 ONLINE TURLISHI UCHUN)
 // ==========================================
 const PORT = process.env.PORT || 10000;
-
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end("KinoBot Server 24/7 Active");
+  res.end("KinoBot Server Active 24/7");
 }).listen(PORT, () => {
-  console.log(`[SYSTEM] Server ${PORT}-portda muvaffaqiyatli ishga tushdi.`);
+  console.log(`[SYSTEM] Server ${PORT}-portda ishlamoqda.`);
 });
 
 // ==========================================
@@ -55,9 +62,9 @@ http.createServer((req, res) => {
 // ==========================================
 async function checkUserSub(ctx) {
   try {
-    if (requiredChannels.size === 0 || ctx.from.id === MY_ADMIN_ID) return true;
+    if (ctx.from.id === MY_ADMIN_ID) return true;
 
-    for (const channel of requiredChannels) {
+    for (const channel of socialLinks.telegramChannels) {
       try {
         const member = await ctx.api.getChatMember(channel, ctx.from.id);
         if (["left", "kicked"].includes(member.status)) return false;
@@ -71,6 +78,27 @@ async function checkUserSub(ctx) {
   }
 }
 
+// Tugmalarni tayyorlash (Telegram + Instagram)
+function getSubscriptionKeyboard() {
+  const kb = new InlineKeyboard();
+
+  // Telegram kanallari
+  for (const ch of socialLinks.telegramChannels) {
+    const cleanLink = ch.startsWith("http") ? ch : `https://t.me/${ch.replace("@", "")}`;
+    kb.url(`📢 Telegram Kanalimiz`, cleanLink).row();
+  }
+
+  // Instagram havolalari
+  if (socialLinks.instagramLinks) {
+    for (const insta of socialLinks.instagramLinks) {
+      kb.url(insta.name || "📸 Instagram", insta.url).row();
+    }
+  }
+
+  kb.text("✅ Obunani tekshirish", "check_subscription_btn");
+  return kb;
+}
+
 bot.use(async (ctx, next) => {
   try {
     if (ctx.from && !ctx.from.is_bot) {
@@ -80,15 +108,9 @@ bot.use(async (ctx, next) => {
     if (ctx.chat?.type === "private" && ctx.message?.text !== "/start") {
       const isOk = await checkUserSub(ctx);
       if (!isOk) {
-        const kb = new InlineKeyboard();
-        for (const ch of requiredChannels) {
-          kb.url(`📢 Kanalga obuna bo'lish`, `https://t.me/${ch.replace("@", "")}`).row();
-        }
-        kb.text("✅ Obunani tekshirish", "check_subscription_btn");
-
-        return ctx.reply("⚠️ **Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:**", {
+        return ctx.reply("⚠️ **Botdan foydalanish uchun quyidagi sahifalarga obuna bo'ling:**", {
           parse_mode: "Markdown",
-          reply_markup: kb,
+          reply_markup: getSubscriptionKeyboard(),
         });
       }
     }
@@ -99,13 +121,14 @@ bot.use(async (ctx, next) => {
 });
 
 // ==========================================
-// 4. KANAL POSTLARINI O'QISH VA FAYLGA SAQLASH
+// 4. MAXFIY BAZA KANALIDAN KINOLARNI QABUL QILISH
 // ==========================================
 bot.on("channel_post", async (ctx) => {
   try {
     const post = ctx.channelPost;
-    
-    if (post.video && post.caption) {
+
+    // Faqat maxfiy bazangiz (-1003937523012) dan kelgan videolar
+    if (post.chat.id === SECRET_CHANNEL_ID && post.video && post.caption) {
       const match = post.caption.match(/\d+/);
       if (match) {
         const code = match[0];
@@ -113,8 +136,8 @@ bot.on("channel_post", async (ctx) => {
           fileId: post.video.file_id,
           caption: post.caption
         });
-        saveDatabase(); // <--- Kinoni diskka (movies.json) saqlab qo'yadi!
-        console.log(`[BAZA] Yangi kino qo'shildi va faylga saqlandi! KOD: ${code}`);
+        saveDatabase(); // movies.json fayliga yozadi
+        console.log(`[BAZA] Yangi kino saqlandi! Kod: ${code}`);
       }
     }
   } catch (err) {
@@ -123,21 +146,15 @@ bot.on("channel_post", async (ctx) => {
 });
 
 // ==========================================
-// 5. ASOSIY TUGBALAR VA BUYRUQLAR
+// 5. BUYRUQLAR VA TUGMALAR
 // ==========================================
 bot.command("start", async (ctx) => {
   try {
     const isOk = await checkUserSub(ctx);
     if (!isOk) {
-      const kb = new InlineKeyboard();
-      for (const ch of requiredChannels) {
-        kb.url(`📢 Kanalga obuna bo'lish`, `https://t.me/${ch.replace("@", "")}`).row();
-      }
-      kb.text("✅ Obunani tekshirish", "check_subscription_btn");
-
-      return ctx.reply("⚠️ **Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:**", {
+      return ctx.reply("⚠️ **Botdan foydalanish uchun quyidagi sahifalarga obuna bo'ling:**", {
         parse_mode: "Markdown",
-        reply_markup: kb,
+        reply_markup: getSubscriptionKeyboard(),
       });
     }
 
@@ -151,16 +168,16 @@ bot.command("start", async (ctx) => {
       { parse_mode: "Markdown", reply_markup: userKb }
     );
   } catch (err) {
-    console.error("[START COMMAND ERROR]:", err.message);
+    console.error("[START ERROR]:", err.message);
   }
 });
 
 bot.hears("🔍 Qanday foydalaniladi?", async (ctx) => {
   await ctx.reply(
     "📌 **Botdan foydalanish yo'riqnomasi:**\n\n" +
-    "1. Telegram kanalimizdan o'zingizga yoqqan kinoning kodini oling.\n" +
+    "1. Kanalimizdan o'zingizga yoqqan kinoning kodini oling.\n" +
     "2. Ushbu botga faqat o'sha **kod raqamini** yozib yuboring (Masalan: `21`).\n" +
-    "3. Bot sizga kinoni barcha ma'lumotlari (nomi, janri, yili) bilan yuboradi!",
+    "3. Bot sizga kinoni barcha ma'lumotlari bilan yuboradi!",
     { parse_mode: "Markdown" }
   );
 });
@@ -181,41 +198,7 @@ bot.hears("👨‍💻 Admin bilan aloqa", async (ctx) => {
 });
 
 // ==========================================
-// 6. ADMIN PANEL BUYRUQLARI
-// ==========================================
-bot.command("addchannel", async (ctx) => {
-  if (ctx.from.id !== MY_ADMIN_ID) return;
-  const chName = ctx.message.text.split(" ")[1];
-  if (!chName || !chName.startsWith("@")) {
-    return ctx.reply("⚠️ Noto'g me'yoriy format! Masalan: `/addchannel @kanal_nomi`", { parse_mode: "Markdown" });
-  }
-  requiredChannels.add(chName);
-  await ctx.reply(`✅ **${chName}** majburiy obunalar ro'yxatiga qo'shildi!`, { parse_mode: "Markdown" });
-});
-
-bot.command("delchannels", async (ctx) => {
-  if (ctx.from.id !== MY_ADMIN_ID) return;
-  requiredChannels.clear();
-  await ctx.reply("🗑 Barcha majburiy obuna kanallari o'chirib tashlandi!");
-});
-
-bot.command("send", async (ctx) => {
-  if (ctx.from.id !== MY_ADMIN_ID) return;
-  const msg = ctx.message.text.replace("/send", "").trim();
-  if (!msg) return ctx.reply("⚠️ Yuborish uchun matn kiriting!");
-
-  let count = 0;
-  for (const uId of usersList) {
-    try {
-      await ctx.api.sendMessage(uId, msg);
-      count++;
-    } catch (e) {}
-  }
-  await ctx.reply(`✅ Xabar **${count}** ta foydalanuvchiga yuborildi.`);
-});
-
-// ==========================================
-// 7. KINO QIDIRISH VA YUKLASH TIZIMI
+// 6. KINO QIDIRISH TIZIMI
 // ==========================================
 bot.on("message:text", async (ctx) => {
   try {
@@ -247,7 +230,6 @@ bot.on("message:text", async (ctx) => {
     }
   } catch (err) {
     console.error("[SEARCH ERROR]:", err.message);
-    // Kiber-xatolik (botni user block qilganda bot to'xtab qolmasligi uchun try/catch ishlaydi)
   }
 });
 
@@ -268,10 +250,9 @@ bot.on("callback_query:data", async (ctx) => {
   }
 });
 
-// Botni to'xtab qolishdan (Crash) saqlash
 bot.catch((err) => {
-  console.error("[GLOBAL BOT CRASH PREVENTED]:", err.error);
+  console.error("[CRASH PREVENTED]:", err.error);
 });
 
 bot.start();
-console.log("🚀 KinoBot muvaffaqiyatli ishga tushdi va xatoliklardan himoyalandi!");
+console.log("🚀 KinoBot muvaffaqiyatli ishga tushdi!");
